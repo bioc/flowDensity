@@ -1,6 +1,6 @@
 .densityGating <- function(obj, channel, n.sd = 1.5, use.percentile = FALSE,  percentile = NA,use.upper=FALSE, upper = NA,verbose=TRUE,twin.factor=.98,
                            bimodal=F,after.peak=NA,alpha = 0.1, sd.threshold = FALSE, all.cuts = FALSE,
-                           tinypeak.removal=tinypeak.removal, adjust.dens = 1,count.lim=20,magnitude = .3,slope.w=4, ...){
+                           tinypeak.removal=tinypeak.removal, adjust.dens = 1,count.lim=20,magnitude = .3,slope.w=4,seq.w=4, spar=.4,...){
 
   ##========================================================================================================================================
   ## 1D density gating method
@@ -21,6 +21,8 @@
   ##   all.cuts: if TRUE, it returns all the cutoff points whose length+1 can roughly estimate the number of cell subsets in that dimension
   ##   tinypeak.removal: a values in [0,1] for ignoring tiny peaks in density
   ##   adjust.dens: The smoothness of density, it is same as adjust in density(.).The default value is 1 and should not be changed unless necessary
+  ##  seq.w: window for generating the sequence of points in density to use in .trackSlope
+  ## spar, is the smoothing factor in spline function, default is .4
   ## Value:
   ##   cutoffs, i.e. thresholds on the 1D data
   ## Authors:
@@ -30,7 +32,7 @@
     x<-obj
     n<- which(!is.na(x))
     channel <-NA
-  dens <- .densityForPlot(data = x, adjust.dens,...)
+  dens <- .densityForPlot(data = x, adjust.dens,spar=spar,...)
   stdev <- sd(x,na.rm = T)
   }else if(class(obj)=="density"){
    warning("Percentiles and SD would be meaningless when dealing with density objects. Make sure to not use them with density objects.")
@@ -42,7 +44,7 @@
   }else{
    x <- exprs(obj)[, channel]
    n<- which(!is.na(x))
-  dens <- .densityForPlot(data = x, adjust.dens,...)
+  dens <- .densityForPlot(data = x, adjust.dens,spar=spar,...)
   stdev <- sd(x,na.rm = T)
   }
 
@@ -75,7 +77,7 @@
    return(quantile(x, probs = percentile, na.rm=T))
   if(use.upper){
     peak.ind <- ifelse(upper, peak.ind[len], peak.ind[1])
-    track.slope.cutoff <- .trackSlope(dens, peak.ind=peak.ind, upper=upper, alpha=alpha,magnitude = magnitude,w=slope.w)
+    track.slope.cutoff <- .trackSlope(dens, peak.ind=peak.ind, upper=upper, alpha=alpha,magnitude = magnitude,w=slope.w,seq.w=seq.w)
     if(is.infinite(track.slope.cutoff))
       return(ifelse(upper, max(dens$x), min(dens$x)))
     else
@@ -89,7 +91,7 @@
       cutoffs <- quantile(x, probs = percentile, na.rm=T)
     } else if (!is.na(upper))
     {
-      track.slope.cutoff <- .trackSlope(dens, peak.ind=peak.ind, upper=upper, alpha=alpha, magnitude = magnitude,w=slope.w)
+      track.slope.cutoff <- .trackSlope(dens, peak.ind=peak.ind, upper=upper, alpha=alpha, magnitude = magnitude,w=slope.w,seq.w=seq.w)
       if(is.infinite(track.slope.cutoff))
         cutoffs <- ifelse(upper, max(dens$x), min(dens$x))
       else
@@ -108,7 +110,7 @@
       }else{
         if(is.na(upper))
           upper <- as.logical(ifelse(peaks>med, FALSE, TRUE))
-        track.slope.cutoff <- .trackSlope(dens, peak.ind=peak.ind, upper=upper, alpha=alpha, magnitude = magnitude,w=slope.w)
+        track.slope.cutoff <- .trackSlope(dens, peak.ind=peak.ind, upper=upper, alpha=alpha, magnitude = magnitude,w=slope.w,seq.w=seq.w)
 
         stdev.cutoff <- ifelse(upper, peaks+n.sd*stdev, peaks-n.sd*stdev)
         cutoffs <- ifelse(is.infinite(track.slope.cutoff)|sd.threshold, stdev.cutoff, track.slope.cutoff) # use the 's.threshold' if the gate from 'trackSlope()' is too loose
@@ -122,7 +124,7 @@
    if(all.cuts)
      return(cutoffs)
 
-     cutoffs <- .getScoreIndex(dat=x, peaks = all.peaks,cutoffs = cutoffs,percentile = percentile,adjust.dens = adjust.dens,w=slope.w,sd.threshold,n.sd=n.sd,
+     cutoffs <- .getScoreIndex(dat=x, peaks = all.peaks,cutoffs = cutoffs,percentile = percentile,adjust.dens = adjust.dens,seq.w=seq.w,w=slope.w,sd.threshold,n.sd=n.sd,
                                upper=upper,alpha=alpha,twin.factor=twin.factor,bimodal=bimodal,after=after.peak,magnitude=magnitude, ...)
 
    }
@@ -136,12 +138,12 @@
 .deGate2D <- function(f, channels, position, n.sd=c(1.5,1.5), use.percentile=c(F,F), percentile=c(NA,NA), use.upper=c(F,F),
                       upper=c(NA,NA), verbose=c(TRUE,TRUE), twin.factor=c(.98,.98), bimodal=c(F,F),filter=NA,tinypeak.removal=c(1/25,1/25),
                       after.peak=c(NA,NA),alpha=c(0.1,0.1), sd.threshold=c(F,F), use.control=c(F,F), control=c(NA,NA),
-                      gates=c(NA,NA),all.cuts=c(F,F),node=NA,remove.margins=F,count.lim=3, ...){
+                      gates=c(NA,NA),all.cuts=c(F,F),remove.margins=F,count.lim=3, spar=spar,seq.w=4,w=4,...){
 
   ##=========================================================================================================================
   ## 2D density gating method
   ##  Args:
-  ##   f: a 'FlowFrame' object or Gating Hierarchy
+  ##   f: a 'FlowFrame' object 
   ##   channels: a vector of two channel names or their equivalent integer number
   ##   position: a vector of two logical values specifying the position of the cell subset of interest on the 2D plot
   ##   use.percentile, use.upper, upper, percentile, sd.threshold, n.sd, alpha: refer to the arguments of the '.densityGating(.)' function
@@ -151,22 +153,7 @@
   ## Author:
   ##   M. Jafar Taghiyar
   ##--------------------------------------------------------------------------------------------------------------------------
-  g.h <-NULL 
-
-  if (class(f)=="GatingHierarchy")
-  {
-    if(!is.na(node))
-    {
-
-      f <-flowWorkspace::gh_pop_get_data(f,node)
-    }else
-      {
-        warning("For gatingHierarchy objects, node is required, otherwise flowFrame at the root node will be used.")
-        g.h <- f
-
-        f <-flowWorkspace::gh_pop_get_data(f)
-      }
-  }
+ 
   i <- which(!is.na(exprs(f)[,channels[1]]))
   if(length(i)==0)
     warning('invalid flowFrame input: This flowFrame has 0 cells, creating dummy gate.')
@@ -212,15 +199,7 @@
     cell.population@cell.count <- length(inds)
     cell.population@position <-position
     cell.population@proportion <- length(inds)/length(i)*100
-if (class(g.h)=="GatingHierarchy")
-{
-   print("Returning polygonGate...")
-  poly <- polygonGate(.gate  =filter)
- 
-    cell.population@filter <- poly
-}else{
-         cell.population@filter <- filter
-}
+    cell.population@filter <- filter
 
     cell.population@index<- inds
     g1<-ifelse(is.na(position[1]),yes = NA,no=ifelse(test = position[1],yes =min(filter[,1]),no = max(filter[,1]) ))
@@ -255,12 +234,14 @@ if (class(g.h)=="GatingHierarchy")
       }
       gates[1] <- .densityGating(obj=f.control1, channel=channels[1], n.sd=n.sd[1], use.percentile=use.percentile[1], percentile=percentile[1], use.upper=use.upper[1], upper=upper[1],
                                  verbose=verbose[1],twin.factor=twin.factor[1],bimodal=bimodal[1],after.peak = after.peak[1],alpha=alpha[1],
-                                 sd.threshold=sd.threshold[1],all.cuts=all.cuts[1],tinypeak.removal=tinypeak.removal[1],count.lim=count.lim)
+                                 sd.threshold=sd.threshold[1],all.cuts=all.cuts[1],tinypeak.removal=tinypeak.removal[1],count.lim=count.lim,
+                                 spar=spar,w=w,seq.w=seq.w)
     }
     else if(!is.na(position[1]))
       gates[1] <- .densityGating(obj=f, channel=channels[1], n.sd=n.sd[1], use.percentile=use.percentile[1], percentile=percentile[1], use.upper=use.upper[1], upper=upper[1],
                                  verbose=verbose[1],twin.factor=twin.factor[1],bimodal=bimodal[1],after.peak = after.peak[1],alpha=alpha[1],
-                                 sd.threshold=sd.threshold[1],all.cuts=all.cuts[1],tinypeak.removal=tinypeak.removal[1],count.lim=count.lim)
+                                 sd.threshold=sd.threshold[1],all.cuts=all.cuts[1],tinypeak.removal=tinypeak.removal[1],count.lim=count.lim,
+                                 spar=spar,w=w,seq.w=seq.w)
     else
       gates[1] <- min(exprs(f)[,channels[1]],na.rm = T)
   }
@@ -289,12 +270,14 @@ if (class(g.h)=="GatingHierarchy")
       }
       gates[2] <- .densityGating(obj=f.control2, channel=channels[2], n.sd=n.sd[2], use.percentile=use.percentile[2], percentile=percentile[2], use.upper=use.upper[2], upper=upper[2],
                                  verbose=verbose[2],twin.factor=twin.factor[2],bimodal=bimodal[2],after.peak = after.peak[2],alpha=alpha[2],
-                                 sd.threshold=sd.threshold[2],all.cuts=all.cuts[2],tinypeak.removal=tinypeak.removal[2],count.lim=count.lim)
+                                 sd.threshold=sd.threshold[2],all.cuts=all.cuts[2],tinypeak.removal=tinypeak.removal[2],count.lim=count.lim,
+                                 spar=spar,w=w,seq.w=seq.w)
     }
     else if(!is.na(position[2]))
       gates[2] <- .densityGating(obj=f, channel=channels[2], n.sd=n.sd[2], use.percentile=use.percentile[2], percentile=percentile[2], use.upper=use.upper[2], upper=upper[2],
                                  verbose=verbose[2],twin.factor=twin.factor[2],bimodal=bimodal[2],after.peak = after.peak[2],alpha=alpha[2],
-                                 sd.threshold=sd.threshold[2],all.cuts=all.cuts[2],tinypeak.removal=tinypeak.removal[2],count.lim=count.lim)
+                                 sd.threshold=sd.threshold[2],all.cuts=all.cuts[2],tinypeak.removal=tinypeak.removal[2],count.lim=count.lim,
+                                 spar=spar,w=w,seq.w=seq.w)
     else
       gates[2] <- min(exprs(f)[,channels[2]],na.rm = T)
   }
@@ -319,23 +302,6 @@ if (class(g.h)=="GatingHierarchy")
   
   if(is.numeric(channels))
     channels <- c(colnames(f)[channels[1]], colnames(f)[channels[2]])
- if (class(g.h)=="GatingHierarchy")
-{
-   print("Returning polygonGate...")
-  poly <- polygonGate(.gate  =filter)
-
-  cell.population <- new("CellPopulation",
-                         flow.frame=new.f,
-                         proportion=proportion,
-                         cell.count=cell.count,
-                         channels=channels,
-                         position=position,
-                         gates=gates,
-                         filter=poly ,
-                         index=cell.index
-  )
-    ######Add gs and recompute here
-}else{
  cell.population <- new("CellPopulation",
                          flow.frame=new.f,
                          proportion=proportion,
@@ -345,12 +311,12 @@ if (class(g.h)=="GatingHierarchy")
                          gates=gates,
                          filter=filter,
                          index=cell.index )
-}
+
   return(cell.population)
 
 }
 
-.deGatePlot <- function(f, cell.population, adjust.dens = 1,node=NA,...){
+.deGatePlot <- function(f, cell.population, adjust.dens = 1,...){
   
   ##========================================================================================
   ## Plots the output of 2D density-estimate gating method
@@ -551,7 +517,8 @@ return.bimodal<-function(x,cutoffs)
   return(cutoffs[which.min(scores)])
 }
 
-.getScoreIndex <- function(dat, peaks,cutoffs,percentile,adjust.dens,upper,alpha,twin.factor,magnitude = magnitude,bimodal,after,w=w, sd.threshold,n.sd,...){
+.getScoreIndex <- function(dat, peaks,cutoffs,percentile,adjust.dens,upper,alpha,twin.factor,magnitude = magnitude,bimodal,spar=spar
+                           ,after,w=w,seq.w=seq.w, sd.threshold,n.sd,...){
   ##==========================================================================================
   ## Returns the cutoff based upon which the .densityGating() function decides on the thresholds
   ## Args:
@@ -567,7 +534,7 @@ return.bimodal<-function(x,cutoffs)
   ##------------------------------------------------------------------------------------------
 
   if (class(dat)!="density"){
-     dens <- .densityForPlot(dat, adjust.dens=1, ...)
+     dens <- .densityForPlot(dat, adjust.dens=1,spar=spar, ...)
   }else{
    warning("Percentiles and SD would be meaningless when dealing with density objects. Make sure to not use them with density objects.")
    dens <- dat
@@ -600,7 +567,8 @@ return.bimodal<-function(x,cutoffs)
         return(quantile(dat, percentile, na.rm=T))
       } else if (!is.na(upper))
       {
-        return(.trackSlope(dens=dens, peak.ind=ifelse(upper,yes = tail(peaks$P.ind,1),no =peaks$P.ind[1]),  upper=upper, alpha=alpha, magnitude = magnitude, w=w))
+        return(.trackSlope(dens=dens, peak.ind=ifelse(upper,yes = tail(peaks$P.ind,1),no =peaks$P.ind[1]), 
+                           upper=upper, alpha=alpha, magnitude = magnitude, w=w,seq.w=seq.w))
 
       }else if (!is.na(sd.threshold))
     {
@@ -638,7 +606,7 @@ return.bimodal<-function(x,cutoffs)
   
 }
 
-.trackSlope <- function(dens, peak.ind, alpha, upper=T, w, return.slope=F,start.lo=1,rev=F,magnitude=.3){
+.trackSlope <- function(dens, peak.ind, alpha, upper=T, w,seq.w=4, return.slope=F,start.lo=1,rev=F,magnitude=.3){
   
   ##==========================================================================================================================
   ## Returns the point of the large change in the slope of the density, i.e., 'dens', where the threshold is likely to be there
@@ -675,7 +643,7 @@ return.bimodal<-function(x,cutoffs)
     warning("not enough point to calculate upper, returning NA.")
     return(NA)
   }
-  for(i in seq(from=lo,to=up,by=w)){
+  for(i in seq(from=lo,to=up,by=seq.w)){
 
     slope <- c(slope, abs((d.y[i+w]-d.y[i-w])/(d.x[i+w]-d.x[i-w])))
     heights <-c(heights,d.y[i])
@@ -709,8 +677,8 @@ return.bimodal<-function(x,cutoffs)
   ## Author:
   ##   M. Jafar Taghiyar
   ##---------------------------------------------------------------------------------------------------------------------------
-  upper.slope <- .trackSlope(dens=dens, peak.ind=peak.ind, alpha=0.1, upper=T, w=w, return.slope=T,magnitude = magnitude)
-  lower.slope <- .trackSlope(dens=dens, peak.ind=peak.ind, alpha=0.1, upper=F, w=w, return.slope=T,magnitude = magnitude)
+  upper.slope <- .trackSlope(dens=dens, peak.ind=peak.ind, alpha=0.1, upper=T, w=w,seq.w = seq.w, return.slope=T,magnitude = magnitude)
+  lower.slope <- .trackSlope(dens=dens, peak.ind=peak.ind, alpha=0.1, upper=F, w=w,seq.w = seq.w, return.slope=T,magnitude = magnitude)
   for(i in 2: (length(upper.slope)-1)){
     if(upper.slope[i]<upper.slope[i+1] & upper.slope[i]<upper.slope[i-1]){
       upper.ind <- (i-1)*w
@@ -770,7 +738,7 @@ return.bimodal<-function(x,cutoffs)
       return(NA)
  }
   dens <- density(data[which(!is.na(data))], adjust=adjust.dens)
-  dens <- smooth.spline(dens$x, dens$y, spar=0.4, ...)
+  dens <- smooth.spline(dens$x, dens$y, spar=spar, ...)
   dens$y[which(dens$y<0)] <- 0
   return(dens)
 }
@@ -795,7 +763,7 @@ return.bimodal<-function(x,cutoffs)
     if(length(ind) != 0)
       f.exprs <- f.exprs[-ind, ]
     #in.p <-  inpoly(x=f.exprs[,channels[1]], y=f.exprs[,channels[2]], POK=POK)
-     in.p <- sp::point.in.polygon(point.x=f.exprs[,channels[1]], point.y=f.exprs[,channels[2]],pol.x=filter[,1],pol.y=filter[,2])
+     in.p <- polyclip::pointinpolygon(list(x=f.exprs[,channels[1]], y=f.exprs[,channels[2]]),list(x=filter[,1],y=filter[,2]))
       tmp.in.p <- vector(mode='numeric', length=length(exprs(f)[,channels[1]]))
     if(length(ind) != 0){
       tmp.in.p[ind] <- NA
@@ -885,17 +853,17 @@ return.bimodal<-function(x,cutoffs)
     X <- exprs(cell@flow.frame)[index,channels]
     filter <- chull(X)
     filter <- X[c(filter,filter[1]),]
-    poly1 <- sp::SpatialPolygons(list(sp::Polygons(list(Polygon(filter)), ID=c("c"))))  
+    poly1 <- list(list(x=filter[,1],y=filter[,2])  )
 
-    poly2 <- sp::SpatialPolygons(list(sp::Polygons(list(Polygon(sub.filter)), ID=c("c")))) 
-
-    if(rgeos::gIntersects( poly1, poly2)){
-       temp <-tryCatch(rgeos::gDifference(poly1,poly2), error=function(ex) return(1))
+    poly2 <- list(list(x=sub.filter[,1],y=sub.filter[,2])  )
+     intersection <- polyclip::polyclip(poly1,poly2,op="intersection")
+    if(length(intersection[[1]][1])>0){
+       temp <-tryCatch(polyclip::polyclip(poly1,poly2,op="minus"), error=function(ex) return(1))
        if (mode(temp)=="numeric")
        {
-         temp <- rgeos::gDifference(poly1,rgeos::gBuffer(poly2))
+         temp <-polyclip::polyclip(poly1,polyclip:polylineoffset(poly2,1)[[1]])
        }
-       filter<-temp@polygons[[1]]@Polygons[[1]]@coords
+       filter<-cbind(c(temp[[1]]$x,temp[[1]]$x[1]),c(temp[[1]]$y,temp[[1]]$y[1]))
     }
   }else
 
@@ -983,7 +951,8 @@ return.bimodal<-function(x,cutoffs)
     
     ## Gate based on the ellipse not the rectangle produced by 'gates'
     #in.p <- inpoly(x=exprs(new.f)[,channels[1]], y=exprs(new.f)[,channels[2]], POK=p)
-       in.p <- sp::point.in.polygon(point.x=exprs(new.f)[,channels[1]], point.y=exprs(new.f)[,channels[2]],pol.x=eg[[2]][,1],pol.y=eg[[2]][,2])
+       in.p <- polyclip::pointinpolygon(list(x=f.exprs[,channels[1]], y=f.exprs[,channels[2]]),
+                                        list(x=eg[[2]][,1],y=eg[[2]][,2]))
        tmp.in.p <- vector(mode='numeric', length=length(exprs(fcs)[,channels[1]]))
       if(length(ind) != 0){
         tmp.in.p[ind] <- NA
@@ -1004,30 +973,4 @@ return.bimodal<-function(x,cutoffs)
 
 }
 
-.luline <- function(data.points, point, m, up = TRUE, tp=NULL){
-  ##================================================================================================================
-  ## Returns the indexes of the points above and below a given line with slope m and the given 'point' coordination
-  ## Args:
-  ##   data.points: a matrix of point with 2 columns specifying the x and y coordinates
-  ##   point: a point on the line with c(x,y) coordination
-  ##   m: slope of the line
-  ##   up: if TRUE the points above the line are returned, else below
-  ##   tp: a test point with c(x,y) coordination to be evaluated if it is above or below the line
-  ## Value:
-  ##   the indexes of the points below and above the line
-  ##-----------------------------------------------------------------------------------------------------------------
-  yCalc <- function(x, m, d) m*x+d
-  d <- point[2]-m*point[1]
-  if(missing(data.points)){
-    dp <- yCalc(tp[1],m,d)
-    return(as.logical(ifelse(up, tp[2]-dp>0, tp[2]-dp<0)))
-  }else{
-    dp <- sapply(data.points[,1], FUN=function(x) yCalc(x=x,m=m,d=d))
-    if(up)
-      res <- which(data.points[,2]-dp>0)
-    else
-      res <- which(data.points[,2]-dp<0)
-    return(res)
-  }
-}
 
