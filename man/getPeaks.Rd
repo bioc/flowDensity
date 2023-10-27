@@ -8,7 +8,7 @@
     Find all peaks in density along with their indices
 }
 \usage{
-getPeaks(obj, channel,tinypeak.removal=1/25, adjust.dens=1,node=NA,verbose=F,twin.factor=1,...)
+getPeaks(obj, channel,tinypeak.removal=1/25, adjust.dens=1,verbose=F,twin.factor=1,spar = 0.4,...)
 }
 \arguments{
   \item{obj}{
@@ -24,9 +24,6 @@ getPeaks(obj, channel,tinypeak.removal=1/25, adjust.dens=1,node=NA,verbose=F,twi
  \item{adjust.dens}{
     The smoothness of density in [0,Inf] to be used in density(.). The default value is 1 and should not be changed unless necessary
   }
-\item{node}{
- Chareacter for the parent population if passing GatingHierarchy object.
-}
 
 \item{verbose}{
  If TRUE, printing warnings.
@@ -34,8 +31,11 @@ getPeaks(obj, channel,tinypeak.removal=1/25, adjust.dens=1,node=NA,verbose=F,twi
 \item{twin.factor}{
  If smaller than 1, peaks that are of greater than hieght as the maximum peak*twin.factor will be removed.
 }
+\item{spar}{
+ argument to pass to smoothSpline function, default value of spar is 0.4.
+}
  \item{...}{
-   Arguments passed to smoothSpline function, spar is 0.4.
+   Other arguments that can be passed to smoothSpline function.
   }
 }
 \value{
