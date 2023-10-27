@@ -1,7 +1,11 @@
 Package: flowDensity
 Type: Package
 Title: Sequential Flow Cytometry Data Gating
+<<<<<<< HEAD
 Version: 1.37.2
+=======
+Version: 1.38.0
+>>>>>>> 594b9e2643d177c4adfdca3fd2f4aa3c2e465470
 Date: 2014-10-14
 Author: Mehrnoush Malek,M. Jafar Taghiyar
 Maintainer: Mehrnoush Malek <mehrmalek@gmail.com>
